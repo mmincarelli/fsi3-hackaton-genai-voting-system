@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: GenAI Voting System with DynamoDB
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.9
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+
+Resources:
+  # DynamoDB Tables
+  TeamsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${Environment}-genai-voting-teams"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  JudgesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${Environment}-genai-voting-judges"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  VotesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${Environment}-genai-voting-votes"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: team_id
+          AttributeType: S
+        - AttributeName: judge_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: team-index
+          KeySchema:
+            - AttributeName: team_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: judge-index
+          KeySchema:
+            - AttributeName: judge_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  CriteriaTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${Environment}-genai-voting-criteria"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  SettingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${Environment}-genai-voting-settings"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key
+          KeyType: HASH
+
+  # Lambda Function
+  VotingSystemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: app_dynamodb.lambda_handler
+      Runtime: python3.9
+      Timeout: 30
+      Environment:
+        Variables:
+          TEAMS_TABLE: !Ref TeamsTable
+          JUDGES_TABLE: !Ref JudgesTable
+          VOTES_TABLE: !Ref VotesTable
+          CRITERIA_TABLE: !Ref CriteriaTable
+          SETTINGS_TABLE: !Ref SettingsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TeamsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JudgesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref VotesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CriteriaTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SettingsTable
+        - SESCrudPolicy:
+            IdentityName: "*"
+      Events:
+        ApiGateway:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+        RootPath:
+          Type: Api
+          Properties:
+            Path: /
+            Method: GET
+
+  # Remove the explicit API Gateway definition to use SAM defaults
+
+  # S3 Bucket for demo files
+  DemoFilesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${Environment}-genai-voting-demos-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+
+Outputs:
+  ApiGatewayUrl:
+    Description: "API Gateway URL"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  
+  S3BucketName:
+    Description: "S3 Bucket for demos"
+    Value: !Ref DemoFilesBucket
+
+  TeamsTableName:
+    Description: "DynamoDB Teams Table"
+    Value: !Ref TeamsTable
+    
+  JudgesTableName:
+    Description: "DynamoDB Judges Table"
+    Value: !Ref JudgesTable
+    
+  VotesTableName:
+    Description: "DynamoDB Votes Table"
+    Value: !Ref VotesTable
